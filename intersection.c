@@ -22,6 +22,15 @@
 #include "input.h"
 
 // TODO: Global variables: mutexes, data structures, etc...
+static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static pthread_t traffic_light_threads[4][4]; 
+static pthread_t supply_thread;
+
+typedef struct {
+  int side; 
+  int direction;
+} ManageLightArgs;
 
 /* 
  * curr_car_arrivals[][][]
@@ -88,7 +97,39 @@ static void* manage_light(void* arg)
   //  - make the traffic light turn red
   //  - unlock the right mutex(es)
 
-  return(0);
+  ManageLightArgs* args = (ManageLightArgs*)arg;
+  int number_arrivals = 0;
+
+  while (get_time_passed() < END_TIME) {
+    if(get_time_passed() > END_TIME) {
+      break;
+    } else {
+      sem_wait(&car_sem[args->side][args->direction]);
+    }
+   
+    
+    pthread_mutex_lock(&mutex);
+    
+
+    Car_Arrival* arrivals = curr_car_arrivals[args->side][args->direction];
+    
+    Car_Arrival current = arrivals[number_arrivals];
+    int car_id = current.id;    
+    printf("traffic light %d %d turns green at time %d for car %d.\n", args->side, args->direction, get_time_passed(), car_id);
+
+    sleep(CROSS_TIME);
+
+    printf("traffic light %d %d turns red at time %d \n", args->side, args->direction, get_time_passed());
+
+    number_arrivals += 1; 
+
+    // release the car
+    pthread_mutex_unlock(&mutex);
+
+  }
+
+  free(arg);
+  return NULL;
 }
 
 
@@ -106,11 +147,32 @@ int main(int argc, char * argv[])
   // start the timer
   start_time();
   
-  // TODO: create a thread per traffic light that executes manage_light
+  // setup struct 
+  for (int i = 0; i < 4; i++) {    // i starts at 0
+    for (int j = 0; j < 4; j++) { // j starts at 0
+      ManageLightArgs* args = malloc(sizeof(ManageLightArgs));
+      args->side = i;
+      args->direction = j;
+      pthread_create(&traffic_light_threads[i][j], NULL, manage_light, args);
+    }
+  }
 
   // TODO: create a thread that executes supply_cars()
+  pthread_create(&supply_thread, NULL, supply_cars, NULL);
 
+  pthread_join(supply_thread, NULL);
+
+  printf("%d\n", get_time_passed());
+  
   // TODO: wait for all threads to finish
+  for (int i = 0; i < 4; i++) {
+    for (int j = 0; j < 4; j++) {
+      pthread_join(traffic_light_threads[i][j], NULL);
+    }
+  }
+
+  printf("%d\n", get_time_passed());
+
 
   // destroy semaphores
   for (int i = 0; i < 4; i++)
@@ -120,4 +182,6 @@ int main(int argc, char * argv[])
       sem_destroy(&car_sem[i][j]);
     }
   }
+
+  return 0; 
 }
