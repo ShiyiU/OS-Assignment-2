@@ -2,11 +2,11 @@
  * Operating Systems (2INC0) Practical Assignment
  * Threading
  *
- * Intersection Part [REPLACE WITH PART NUMBER]
+ * Intersection Part [1]
  * 
- * STUDENT_NAME_1 (STUDENT_NR_1)
- * STUDENT_NAME_2 (STUDENT_NR_2)
- * STUDENT_NAME_3 (STUDENT_NR_3)
+ * Shiyi Chng (1927159)
+ * Wilson Huang (1982931)
+ * Jiyu Lee (1977830)
  */
 
 #include <stdio.h>
@@ -99,39 +99,62 @@ static void* manage_light(void* arg)
 
   ManageLightArgs* args = (ManageLightArgs*)arg;
   int number_arrivals = 0;
+  struct timespec ts;
+  int wait_result;
 
-  while (get_time_passed() < END_TIME) {
-    if(get_time_passed() > END_TIME) {
+  while (1) {
+
+    int timeout = END_TIME - get_time_passed();
+
+    // If we've reached END_TIME, exit the thread
+    if (timeout <= 0) {
       break;
-    } else {
-      sem_wait(&car_sem[args->side][args->direction]);
     }
-   
     
+    // Set up timeout - current time + calculated timeout
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_sec += timeout;  // Use the calculated timeout
+    
+    // Use sem_timedwait instead of sem_wait
+    wait_result = sem_timedwait(&car_sem[args->side][args->direction], &ts);
+    
+    if (wait_result == -1) {
+      if (errno == ETIMEDOUT) {
+        // Timeout occurred - we've reached END_TIME
+        printf("Timeout occurred for traffic light %d %d at time %d\n", 
+               args->side, args->direction, get_time_passed());
+        break;  // Exit the thread
+      } else if (errno == EINTR) {
+        // Interrupted by signal, try again
+        continue;
+      } else {
+        // Handle other errors
+        perror("sem_timedwait error");
+        break;
+      }
+    }
+
     pthread_mutex_lock(&mutex);
-    
 
     Car_Arrival* arrivals = curr_car_arrivals[args->side][args->direction];
     
     Car_Arrival current = arrivals[number_arrivals];
     int car_id = current.id;    
-    printf("traffic light %d %d turns green at time %d for car %d.\n", args->side, args->direction, get_time_passed(), car_id);
+    printf("traffic light %d %d turns green at time %d for car %d\n", args->side, args->direction, get_time_passed(), car_id);
 
     sleep(CROSS_TIME);
 
-    printf("traffic light %d %d turns red at time %d \n", args->side, args->direction, get_time_passed());
+    printf("traffic light %d %d turns red at time %d\n", args->side, args->direction, get_time_passed());
 
     number_arrivals += 1; 
 
     // release the car
     pthread_mutex_unlock(&mutex);
-
   }
 
   free(arg);
   return NULL;
 }
-
 
 int main(int argc, char * argv[])
 {
@@ -142,6 +165,13 @@ int main(int argc, char * argv[])
     {
       sem_init(&car_sem[i][j], 0, 0);
     }
+  }
+
+  // Precompute total arrivals per (side, direction)
+  int total_arrivals[4][4] = {{0}};
+  for (int i = 0; i < sizeof(input_car_arrivals)/sizeof(Car_Arrival); i++) {
+      Car_Arrival arrival = input_car_arrivals[i];
+      total_arrivals[arrival.side][arrival.direction]++;
   }
 
   // start the timer
@@ -161,8 +191,6 @@ int main(int argc, char * argv[])
   pthread_create(&supply_thread, NULL, supply_cars, NULL);
 
   pthread_join(supply_thread, NULL);
-
-  printf("%d\n", get_time_passed());
   
   // TODO: wait for all threads to finish
   for (int i = 0; i < 4; i++) {
@@ -170,9 +198,6 @@ int main(int argc, char * argv[])
       pthread_join(traffic_light_threads[i][j], NULL);
     }
   }
-
-  printf("%d\n", get_time_passed());
-
 
   // destroy semaphores
   for (int i = 0; i < 4; i++)
